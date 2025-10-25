@@ -17,9 +17,6 @@ const tableBody = document.getElementById('tableBody');
 const resultCount = document.getElementById('resultCount');
 const btnSearch = document.querySelector('.btn-search');
 
-// Event Listeners
-searchForm.addEventListener('submit', handleSearch);
-
 // Variável global para armazenar todos os resultados
 let allResults = [];
 
@@ -49,17 +46,15 @@ async function handleSearch(e) {
 
     try {
         // Formatar datas para ISO 8601, ajustando para incluir o horário para precisão.
-        // dataInicio deve ser 00:00:00 do dia selecionado (inclusive)
         const dataInicioISO = `${dataInicio.value}T00:00:00Z`;
-        // dataFim deve ser 23:59:59 do dia selecionado (inclusive)
         const dataFimISO = `${dataFim.value}T23:59:59Z`;
 
-        // Construir URL com parâmetros
+        // Construir URL com parâmetros, solicitando um limite alto (10000)
         const params = new URLSearchParams({
             'founded.gte': dataInicioISO,
             'founded.lte': dataFimISO,
             'company.simei.optant.eq': 'true', // Filtro MEI reativado
-            'limit': '10000' // Aumenta o limite para 10.000, conforme solicitado
+            'limit': '10000' // Limite máximo solicitado
         });
 
         const url = `${API_BASE_URL}?${params.toString()}`;
@@ -85,7 +80,6 @@ async function handleSearch(e) {
         apiResponseSpan.textContent = JSON.stringify(data, null, 2).substring(0, 500) + '...'; // Limita o tamanho do log
 
         // Processar resultados
-        // CORREÇÃO: A API CNPJjá retorna o array de resultados na chave 'records'
         if (data.records && data.records.length > 0) {
             allResults = data.records; // Armazena todos os resultados
             displayResults(allResults); // Exibe os resultados
@@ -104,22 +98,19 @@ async function handleSearch(e) {
 // Função de utilidade para extrair o email de um registro
 function extractEmail(empresa) {
     let email = 'N/A';
+    // Tenta extrair o email de diferentes campos
     const emailData = empresa.company?.email || empresa.emails?.[0] || empresa.email;
 
-    if (typeof emailData === 'string') {
+    if (typeof emailData === 'string' && emailData.trim() !== '') {
         email = emailData;
-    } else if (emailData && typeof emailData === 'object' && emailData.address) {
-        email = emailData.address;
-    } else if (emailData && typeof emailData === 'object' && emailData.value) {
-        email = emailData.value;
+    } else if (emailData && typeof emailData === 'object' && (emailData.address || emailData.value)) {
+        email = emailData.address || emailData.value;
     } else if (Array.isArray(empresa.emails) && empresa.emails.length > 0) {
         const firstEmail = empresa.emails[0];
-        if (typeof firstEmail === 'string') {
+        if (typeof firstEmail === 'string' && firstEmail.trim() !== '') {
             email = firstEmail;
-        } else if (firstEmail.address) {
-            email = firstEmail.address;
-        } else if (firstEmail.value) {
-            email = firstEmail.value;
+        } else if (firstEmail && (firstEmail.address || firstEmail.value)) {
+            email = firstEmail.address || firstEmail.value;
         }
     }
     return email;
@@ -141,7 +132,7 @@ function exportEmails() {
         return;
     }
 
-    const emailsText = emails.join('\\n');
+    const emailsText = emails.join('\n');
     
     // Cria um Blob para download
     const blob = new Blob([emailsText], { type: 'text/plain;charset=utf-8' });
@@ -161,15 +152,6 @@ function exportEmails() {
     alert(`Exportação concluída! ${emails.length} e-mail(s) exportado(s) para "emails_mei_export.txt".`);
 }
 
-// Event Listeners
-searchForm.addEventListener('submit', handleSearch);
-// Adiciona o listener para o novo botão de exportar (será criado no HTML)
-document.addEventListener('click', function(e) {
-    if (e.target.id === 'btnExportEmails') {
-        exportEmails();
-    }
-});
-
 // Função para exibir resultados
 function displayResults(results) {
     // Limpar tabela
@@ -182,7 +164,7 @@ function displayResults(results) {
         // Extrair dados
         const cnpj = empresa.taxId || 'N/A';
         const razaoSocial = empresa.company?.name || 'N/A';
-        const email = extractEmail(empresa); // Usa a nova função de utilidade
+        const email = extractEmail(empresa); // Usa a função de utilidade
         const dataAbertura = formatarData(empresa.founded);
         const status = empresa.status?.text || 'N/A';
         const statusClass = status === 'Ativa' ? 'status-active' : 'status-inactive';
@@ -281,6 +263,15 @@ function setDefaultDates() {
 
 // Inicializar com datas padrão
 setDefaultDates();
+
+// Event Listeners
+searchForm.addEventListener('submit', handleSearch);
+// Adiciona o listener para o novo botão de exportar
+document.addEventListener('click', function(e) {
+    if (e.target.id === 'btnExportEmails') {
+        exportEmails();
+    }
+});
 
 // Ocultar o botão de exportar no início
 document.addEventListener('DOMContentLoaded', () => {
