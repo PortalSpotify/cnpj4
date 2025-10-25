@@ -31,6 +31,7 @@
                     </div>
 
                     <button type="submit" class="btn-search">Buscar Empresas</button>
+                    <button type="button" id="btnExportEmails" class="btn-export hidden">Exportar Emails</button>
                 </form>
             </section>
 
@@ -49,13 +50,7 @@
 
                 <div id="resultsContainer" class="results-container hidden">
                     <h2>Resultados da Busca</h2>
-                    <div class="result-header">
-                        <p id="resultCount" class="result-count"></p>
-                        <div class="export-actions">
-                            <button id="btnExportEmails" class="btn-export hidden">Copiar/Exportar Emails</button>
-                            <button id="btnExportCNPJs" class="btn-export hidden">Copiar/Exportar CNPJs</button>
-                        </div>
-                    </div>
+                    <p id="resultCount" class="result-count"></p>
                     <div class="table-wrapper">
                         <table id="resultsTable" class="results-table">
                             <thead>
