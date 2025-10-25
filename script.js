@@ -1,0 +1,294 @@
+// Configurações da API
+const API_BASE_URL = 'https://api.cnpja.com/office';
+const API_KEY = 'e3eba6c7-ceee-42b8-99b9-2565102a6bc3-44d3856b-603a-4d0c-9a28-a57dbfd43724';
+
+// Elementos do DOM
+const searchForm = document.getElementById('searchForm' );
+const dataInicio = document.getElementById('dataInicio');
+const dataFim = document.getElementById('dataFim');
+const loadingSpinner = document.getElementById('loadingSpinner');
+const errorMessage = document.getElementById('errorMessage');
+const debugInfo = document.getElementById('debugInfo');
+const requestUrlSpan = document.getElementById('requestUrl');
+const apiResponseSpan = document.getElementById('apiResponse');
+const resultsContainer = document.getElementById('resultsContainer');
+const noResults = document.getElementById('noResults');
+const tableBody = document.getElementById('tableBody');
+const resultCount = document.getElementById('resultCount');
+const btnSearch = document.querySelector('.btn-search');
+const btnExportEmails = document.getElementById('btnExportEmails');
+const btnExportCNPJs = document.getElementById('btnExportCNPJs');
+
+// Variável global para armazenar os resultados da busca
+let currentResults = [];
+
+// Event Listeners
+searchForm.addEventListener('submit', handleSearch);
+btnExportEmails.addEventListener('click', () => exportData('emails'));
+btnExportCNPJs.addEventListener('click', () => exportData('cnpjs'));
+
+// Função principal de busca
+async function handleSearch(e) {
+    e.preventDefault();
+
+    // Validação de datas
+    const inicio = new Date(dataInicio.value);
+    const fim = new Date(dataFim.value);
+
+    if (inicio > fim) {
+        showError('A data de início não pode ser maior que a data de fim.');
+        return;
+    }
+
+    // Limpar resultados anteriores
+    clearResults();
+    currentResults = []; // Limpa a variável de resultados também
+    
+    // Ocultar debug
+    debugInfo.classList.add('hidden');
+
+    // Mostrar spinner de carregamento
+    showLoading(true);
+    btnSearch.disabled = true;
+
+    try {
+        // Formatar datas para ISO 8601, ajustando para incluir o horário para precisão.
+        // dataInicio deve ser 00:00:00 do dia selecionado (inclusive)
+        const dataInicioISO = `${dataInicio.value}T00:00:00Z`;
+        // dataFim deve ser 23:59:59 do dia selecionado (inclusive)
+        const dataFimISO = `${dataFim.value}T23:59:59Z`;
+
+        // Construir URL com parâmetros
+        const params = new URLSearchParams({
+            'founded.gte': dataInicioISO,
+            'founded.lte': dataFimISO,
+            'company.simei.optant.eq': 'true', // Filtro MEI reativado
+            'limit': '5'
+        });
+
+        const url = `${API_BASE_URL}?${params.toString()}`;
+        requestUrlSpan.textContent = url;
+        debugInfo.classList.remove('hidden');
+
+        // Fazer requisição à API
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': API_KEY,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            apiResponseSpan.textContent = `Status: ${response.status}. Resposta: ${errorText}`;
+            throw new Error(`Erro na API: ${response.status} - ${response.statusText}. Detalhes no console e na seção de debug.`);
+        }
+
+        const data = await response.json();
+        apiResponseSpan.textContent = JSON.stringify(data, null, 2).substring(0, 500) + '...'; // Limita o tamanho do log
+
+        // Processar resultados
+        // CORREÇÃO: A API CNPJjá retorna o array de resultados na chave 'records'
+        if (data.records && data.records.length > 0) {
+            currentResults = data.records; // Armazena os resultados globalmente
+            displayResults(currentResults); // Usando currentResults
+        } else {
+            showNoResults();
+        }
+    } catch (error) {
+        console.error('Erro ao buscar dados:', error);
+        showError(`Erro ao buscar dados: ${error.message}`);
+    } finally {
+        showLoading(false);
+        btnSearch.disabled = false;
+    }
+}
+
+// Função para exibir resultados
+function displayResults(results) {
+    // Limpar tabela
+    tableBody.innerHTML = '';
+
+    // Adicionar linhas à tabela
+    results.forEach((empresa, index) => {
+        const row = document.createElement('tr');
+        
+        // Extrair dados
+        const cnpj = empresa.taxId || 'N/A';
+        const razaoSocial = empresa.company?.name || 'N/A';
+        const email = extractEmail(empresa) || 'N/A';
+        const dataAbertura = formatarData(empresa.founded);
+        const status = empresa.status?.text || 'N/A';
+        const statusClass = status === 'Ativa' ? 'status-active' : 'status-inactive';
+
+        row.innerHTML = `
+            <td><strong>${formatarCNPJ(cnpj)}</strong></td>
+            <td>${razaoSocial}</td>
+            <td><a href="mailto:${email}">${email}</a></td>
+            <td>${dataAbertura}</td>
+            <td><span class="${statusClass}">${status}</span></td>
+        `;
+
+        tableBody.appendChild(row);
+    });
+
+    // Atualizar contagem de resultados
+    resultCount.textContent = `${results.length} empresa(s) encontrada(s)`;
+
+    // Mostrar container de resultados e botões de exportação
+    resultsContainer.classList.remove('hidden');
+    noResults.classList.add('hidden');
+    debugInfo.classList.add('hidden');
+    btnExportEmails.classList.remove('hidden');
+    btnExportCNPJs.classList.remove('hidden');
+}
+
+// Função de utilidade para extrair o email de um registro
+function extractEmail(empresa) {
+    let email = 'N/A';
+    const emailData = empresa.company?.email || empresa.emails?.[0] || empresa.email;
+
+    if (typeof emailData === 'string') {
+        email = emailData;
+    } else if (emailData && typeof emailData === 'object' && emailData.address) {
+        email = emailData.address;
+    } else if (emailData && typeof emailData === 'object' && emailData.value) {
+        email = emailData.value;
+    } else if (Array.isArray(empresa.emails) && empresa.emails.length > 0) {
+        const firstEmail = empresa.emails[0];
+        if (typeof firstEmail === 'string') {
+            email = firstEmail;
+        } else if (firstEmail.address) {
+            email = firstEmail.address;
+        } else if (firstEmail.value) {
+            email = firstEmail.value;
+        }
+    }
+    return email === 'N/A' || email === '' ? null : email;
+}
+
+// Função para copiar/exportar dados (emails ou cnpjs)
+async function exportData(type) {
+    if (currentResults.length === 0) {
+        alert('Nenhum resultado para exportar.');
+        return;
+    }
+
+    let dataToExport;
+    let fileName;
+    let dataType;
+
+    if (type === 'emails') {
+        // Filtra e mapeia apenas emails válidos
+        dataToExport = currentResults
+            .map(extractEmail)
+            .filter(email => email !== null);
+        fileName = 'emails_mei.txt';
+        dataType = 'Emails';
+    } else if (type === 'cnpjs') {
+        // Mapeia e formata CNPJs
+        dataToExport = currentResults
+            .map(empresa => formatarCNPJ(empresa.taxId || 'N/A'))
+            .filter(cnpj => cnpj !== 'N/A');
+        fileName = 'cnpjs_mei.txt';
+        dataType = 'CNPJs';
+    } else {
+        return;
+    }
+
+    const content = dataToExport.join('\\n');
+
+    // Tenta copiar para a área de transferência
+    try {
+        await navigator.clipboard.writeText(content);
+        alert(`${dataType} copiados para a área de transferência!`);
+    } catch (err) {
+        console.error('Falha ao copiar para a área de transferência:', err);
+        // Se falhar, oferece download como alternativa
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        alert(`Falha ao copiar para a área de transferência. Iniciando download de ${fileName} como alternativa.`);
+    }
+}
+
+// Função para exibir erro
+function showError(message) {
+    errorMessage.textContent = message;
+    errorMessage.classList.remove('hidden');
+    debugInfo.classList.add('hidden');
+}
+
+// Função para limpar resultados
+function clearResults() {
+    tableBody.innerHTML = '';
+    errorMessage.classList.add('hidden');
+    resultsContainer.classList.add('hidden');
+    noResults.classList.add('hidden');
+    debugInfo.classList.add('hidden');
+    // Ocultar botões de exportação ao limpar
+    if (btnExportEmails && btnExportCNPJs) {
+        btnExportEmails.classList.add('hidden');
+        btnExportCNPJs.classList.add('hidden');
+    }
+}
+
+// Função para exibir mensagem de nenhum resultado
+function showNoResults() {
+    resultsContainer.classList.add('hidden');
+    noResults.classList.remove('hidden');
+    debugInfo.classList.add('hidden');
+    // Ocultar botões de exportação
+    if (btnExportEmails && btnExportCNPJs) {
+        btnExportEmails.classList.add('hidden');
+        btnExportCNPJs.classList.add('hidden');
+    }
+}
+
+// Função para mostrar/ocultar spinner
+function showLoading(show) {
+    if (show) {
+        loadingSpinner.classList.remove('hidden');
+    } else {
+        loadingSpinner.classList.add('hidden');
+    }
+}
+
+// Função para formatar CNPJ
+function formatarCNPJ(cnpj) {
+    if (!cnpj || cnpj === 'N/A') return cnpj;
+    const cnpjLimpo = cnpj.replace(/\D/g, '');
+    if (cnpjLimpo.length !== 14) return cnpj;
+    return `${cnpjLimpo.substring(0, 2)}.${cnpjLimpo.substring(2, 5)}.${cnpjLimpo.substring(5, 8)}/${cnpjLimpo.substring(8, 12)}-${cnpjLimpo.substring(12)}`;
+}
+
+// Função para formatar data
+function formatarData(data) {
+    if (!data || data === 'N/A') return data;
+    try {
+        const date = new Date(data);
+        return date.toLocaleDateString('pt-BR');
+    } catch (error) {
+        return data;
+    }
+}
+
+// Definir data padrão (últimos 6 meses)
+function setDefaultDates() {
+    const hoje = new Date();
+    // Define o período padrão para os últimos 6 meses (aprox. 180 dias)
+    const seisMeses = new Date(hoje.getTime() - 180 * 24 * 60 * 60 * 1000);
+
+    dataFim.value = hoje.toISOString().split('T')[0];
+    dataInicio.value = seisMeses.toISOString().split('T')[0];
+}
+
+// Inicializar com datas padrão
+setDefaultDates();
