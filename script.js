@@ -20,9 +20,6 @@ const btnSearch = document.querySelector('.btn-search');
 // Event Listeners
 searchForm.addEventListener('submit', handleSearch);
 
-// Variável global para armazenar todos os resultados
-let allResults = [];
-
 // Função principal de busca
 async function handleSearch(e) {
     e.preventDefault();
@@ -38,7 +35,6 @@ async function handleSearch(e) {
 
     // Limpar resultados anteriores
     clearResults();
-    allResults = []; // Limpa resultados globais
     
     // Ocultar debug
     debugInfo.classList.add('hidden');
@@ -54,16 +50,43 @@ async function handleSearch(e) {
         // dataFim deve ser 23:59:59 do dia selecionado (inclusive)
         const dataFimISO = `${dataFim.value}T23:59:59Z`;
 
-        // Inicia a busca com o primeiro lote
-        await fetchAllResults(dataInicioISO, dataFimISO);
+        // Construir URL com parâmetros
+        const params = new URLSearchParams({
+            'founded.gte': dataInicioISO,
+            'founded.lte': dataFimISO,
+            'company.simei.optant.eq': 'true', // Filtro MEI reativado
+            'limit': '1000'
+        });
+
+        const url = `${API_BASE_URL}?${params.toString()}`;
+        requestUrlSpan.textContent = url;
+        debugInfo.classList.remove('hidden');
+
+        // Fazer requisição à API
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': API_KEY,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            apiResponseSpan.textContent = `Status: ${response.status}. Resposta: ${errorText}`;
+            throw new Error(`Erro na API: ${response.status} - ${response.statusText}. Detalhes no console e na seção de debug.`);
+        }
+
+        const data = await response.json();
+        apiResponseSpan.textContent = JSON.stringify(data, null, 2).substring(0, 500) + '...'; // Limita o tamanho do log
 
         // Processar resultados
-        if (allResults.length > 0) {
-            displayResults(allResults);
+        // CORREÇÃO: A API CNPJjá retorna o array de resultados na chave 'records'
+        if (data.records && data.records.length > 0) {
+            displayResults(data.records); // Usando data.records
         } else {
             showNoResults();
         }
-
     } catch (error) {
         console.error('Erro ao buscar dados:', error);
         showError(`Erro ao buscar dados: ${error.message}`);
@@ -72,123 +95,6 @@ async function handleSearch(e) {
         btnSearch.disabled = false;
     }
 }
-
-// Função para buscar todos os resultados com paginação
-async function fetchAllResults(dataInicioISO, dataFimISO, offset = 0) {
-    const limit = 100; // Limite razoável por requisição para evitar timeout
-    
-    const params = new URLSearchParams({
-        'founded.gte': dataInicioISO,
-        'founded.lte': dataFimISO,
-        'company.simei.optant.eq': 'true',
-        'limit': limit,
-        'offset': offset
-    });
-
-    const url = `${API_BASE_URL}?${params.toString()}`;
-    requestUrlSpan.textContent = url;
-    debugInfo.classList.remove('hidden');
-
-    // Fazer requisição à API
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'Authorization': API_KEY,
-            'Content-Type': 'application/json'
-        }
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        apiResponseSpan.textContent = `Status: ${response.status}. Resposta: ${errorText}`;
-        throw new Error(`Erro na API: ${response.status} - ${response.statusText}. Detalhes no console e na seção de debug.`);
-    }
-
-    const data = await response.json();
-    apiResponseSpan.textContent = JSON.stringify(data, null, 2).substring(0, 500) + '...';
-
-    // Adiciona os resultados
-    if (data.records && data.records.length > 0) {
-        allResults.push(...data.records);
-
-        // Verifica se há mais páginas
-        if (data.records.length === limit) {
-            // Continua a busca recursivamente
-            await fetchAllResults(dataInicioISO, dataFimISO, offset + limit);
-        }
-    }
-}
-
-// Função de utilidade para extrair o email de um registro
-function extractEmail(empresa) {
-    let email = 'N/A';
-    const emailData = empresa.company?.email || empresa.emails?.[0] || empresa.email;
-
-    if (typeof emailData === 'string') {
-        email = emailData;
-    } else if (emailData && typeof emailData === 'object' && emailData.address) {
-        email = emailData.address;
-    } else if (emailData && typeof emailData === 'object' && emailData.value) {
-        email = emailData.value;
-    } else if (Array.isArray(empresa.emails) && empresa.emails.length > 0) {
-        const firstEmail = empresa.emails[0];
-        if (typeof firstEmail === 'string') {
-            email = firstEmail;
-        } else if (firstEmail.address) {
-            email = firstEmail.address;
-        } else if (firstEmail.value) {
-            email = firstEmail.value;
-        }
-    }
-    return email;
-}
-
-// Função para exportar emails
-function exportEmails() {
-    if (allResults.length === 0) {
-        alert('Nenhum resultado para exportar.');
-        return;
-    }
-
-    const emails = allResults
-        .map(empresa => extractEmail(empresa))
-        .filter(email => email !== 'N/A');
-
-    if (emails.length === 0) {
-        alert('Nenhum email válido encontrado para exportar.');
-        return;
-    }
-
-    const emailsText = emails.join('\\n');
-    
-    // Cria um Blob para download
-    const blob = new Blob([emailsText], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    
-    // Cria um link temporário para iniciar o download
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'emails_mei_export.txt';
-    document.body.appendChild(a);
-    a.click();
-    
-    // Limpa o link temporário e o URL do objeto
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    alert(`Exportação concluída! ${emails.length} e-mail(s) exportado(s) para "emails_mei_export.txt".`);
-}
-
-// Event Listeners
-searchForm.addEventListener('submit', handleSearch);
-// Adiciona o listener para o novo botão de exportar (será criado no HTML)
-document.addEventListener('click', function(e) {
-    if (e.target.id === 'btnExportEmails') {
-        exportEmails();
-    }
-});
-        requestUrlSpan.textContent = url;
-        debugInfo.classList.remove('hidden');
 
 // Função para exibir resultados
 function displayResults(results) {
@@ -202,7 +108,28 @@ function displayResults(results) {
         // Extrair dados
         const cnpj = empresa.taxId || 'N/A';
         const razaoSocial = empresa.company?.name || 'N/A';
-        const email = extractEmail(empresa); // Usa a nova função de utilidade
+        let email = 'N/A';
+        const emailData = empresa.company?.email || empresa.emails?.[0] || empresa.email;
+
+        if (typeof emailData === 'string') {
+            email = emailData;
+        } else if (emailData && typeof emailData === 'object' && emailData.address) {
+            // Se for um objeto com a chave 'address' (hipótese comum para APIs)
+            email = emailData.address;
+        } else if (emailData && typeof emailData === 'object' && emailData.value) {
+            // Se for um objeto com a chave 'value'
+            email = emailData.value;
+        } else if (Array.isArray(empresa.emails) && empresa.emails.length > 0) {
+            // Caso a primeira tentativa falhe, tenta extrair de um array de objetos
+            const firstEmail = empresa.emails[0];
+            if (typeof firstEmail === 'string') {
+                email = firstEmail;
+            } else if (firstEmail.address) {
+                email = firstEmail.address;
+            } else if (firstEmail.value) {
+                email = firstEmail.value;
+            }
+        }
         const dataAbertura = formatarData(empresa.founded);
         const status = empresa.status?.text || 'N/A';
         const statusClass = status === 'Ativa' ? 'status-active' : 'status-inactive';
@@ -220,12 +147,6 @@ function displayResults(results) {
 
     // Atualizar contagem de resultados
     resultCount.textContent = `${results.length} empresa(s) encontrada(s)`;
-
-    // Adiciona o botão de exportar emails
-    const exportButton = document.getElementById('btnExportEmails');
-    if (exportButton) {
-        exportButton.classList.remove('hidden');
-    }
 
     // Mostrar container de resultados
     resultsContainer.classList.remove('hidden');
@@ -254,11 +175,6 @@ function clearResults() {
     resultsContainer.classList.add('hidden');
     noResults.classList.add('hidden');
     debugInfo.classList.add('hidden');
-    // Oculta o botão de exportar
-    const exportButton = document.getElementById('btnExportEmails');
-    if (exportButton) {
-        exportButton.classList.add('hidden');
-    }
 }
 
 // Função para mostrar/ocultar spinner
@@ -301,11 +217,3 @@ function setDefaultDates() {
 
 // Inicializar com datas padrão
 setDefaultDates();
-
-// Ocultar o botão de exportar no início
-document.addEventListener('DOMContentLoaded', () => {
-    const exportButton = document.getElementById('btnExportEmails');
-    if (exportButton) {
-        exportButton.classList.add('hidden');
-    }
-});
