@@ -17,8 +17,8 @@ const tableBody = document.getElementById('tableBody');
 const resultCount = document.getElementById('resultCount');
 const btnSearch = document.querySelector('.btn-search');
 
-// Event Listeners
-searchForm.addEventListener('submit', handleSearch);
+// Variável global para armazenar todos os resultados
+let allResults = [];
 
 // Função principal de busca
 async function handleSearch(e) {
@@ -35,6 +35,7 @@ async function handleSearch(e) {
 
     // Limpar resultados anteriores
     clearResults();
+    allResults = []; // Limpa resultados globais
     
     // Ocultar debug
     debugInfo.classList.add('hidden');
@@ -45,17 +46,15 @@ async function handleSearch(e) {
 
     try {
         // Formatar datas para ISO 8601, ajustando para incluir o horário para precisão.
-        // dataInicio deve ser 00:00:00 do dia selecionado (inclusive)
         const dataInicioISO = `${dataInicio.value}T00:00:00Z`;
-        // dataFim deve ser 23:59:59 do dia selecionado (inclusive)
         const dataFimISO = `${dataFim.value}T23:59:59Z`;
 
-        // Construir URL com parâmetros
+        // Construir URL com parâmetros, solicitando um limite alto (10000)
         const params = new URLSearchParams({
             'founded.gte': dataInicioISO,
             'founded.lte': dataFimISO,
             'company.simei.optant.eq': 'true', // Filtro MEI reativado
-            'limit': '1000'
+            'limit': '5' // Limite máximo solicitado
         });
 
         const url = `${API_BASE_URL}?${params.toString()}`;
@@ -81,9 +80,9 @@ async function handleSearch(e) {
         apiResponseSpan.textContent = JSON.stringify(data, null, 2).substring(0, 500) + '...'; // Limita o tamanho do log
 
         // Processar resultados
-        // CORREÇÃO: A API CNPJjá retorna o array de resultados na chave 'records'
         if (data.records && data.records.length > 0) {
-            displayResults(data.records); // Usando data.records
+            allResults = data.records; // Armazena todos os resultados
+            displayResults(allResults); // Exibe os resultados
         } else {
             showNoResults();
         }
@@ -94,6 +93,63 @@ async function handleSearch(e) {
         showLoading(false);
         btnSearch.disabled = false;
     }
+}
+
+// Função de utilidade para extrair o email de um registro
+function extractEmail(empresa) {
+    let email = 'N/A';
+    // Tenta extrair o email de diferentes campos
+    const emailData = empresa.company?.email || empresa.emails?.[0] || empresa.email;
+
+    if (typeof emailData === 'string' && emailData.trim() !== '') {
+        email = emailData;
+    } else if (emailData && typeof emailData === 'object' && (emailData.address || emailData.value)) {
+        email = emailData.address || emailData.value;
+    } else if (Array.isArray(empresa.emails) && empresa.emails.length > 0) {
+        const firstEmail = empresa.emails[0];
+        if (typeof firstEmail === 'string' && firstEmail.trim() !== '') {
+            email = firstEmail;
+        } else if (firstEmail && (firstEmail.address || firstEmail.value)) {
+            email = firstEmail.address || firstEmail.value;
+        }
+    }
+    return email;
+}
+
+// Função para exportar emails
+function exportEmails() {
+    if (allResults.length === 0) {
+        alert('Nenhum resultado para exportar.');
+        return;
+    }
+
+    const emails = allResults
+        .map(empresa => extractEmail(empresa))
+        .filter(email => email !== 'N/A');
+
+    if (emails.length === 0) {
+        alert('Nenhum email válido encontrado para exportar.');
+        return;
+    }
+
+    const emailsText = emails.join('\n');
+    
+    // Cria um Blob para download
+    const blob = new Blob([emailsText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    // Cria um link temporário para iniciar o download
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'emails_mei_export.txt';
+    document.body.appendChild(a);
+    a.click();
+    
+    // Limpa o link temporário e o URL do objeto
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    alert(`Exportação concluída! ${emails.length} e-mail(s) exportado(s) para "emails_mei_export.txt".`);
 }
 
 // Função para exibir resultados
@@ -108,28 +164,7 @@ function displayResults(results) {
         // Extrair dados
         const cnpj = empresa.taxId || 'N/A';
         const razaoSocial = empresa.company?.name || 'N/A';
-        let email = 'N/A';
-        const emailData = empresa.company?.email || empresa.emails?.[0] || empresa.email;
-
-        if (typeof emailData === 'string') {
-            email = emailData;
-        } else if (emailData && typeof emailData === 'object' && emailData.address) {
-            // Se for um objeto com a chave 'address' (hipótese comum para APIs)
-            email = emailData.address;
-        } else if (emailData && typeof emailData === 'object' && emailData.value) {
-            // Se for um objeto com a chave 'value'
-            email = emailData.value;
-        } else if (Array.isArray(empresa.emails) && empresa.emails.length > 0) {
-            // Caso a primeira tentativa falhe, tenta extrair de um array de objetos
-            const firstEmail = empresa.emails[0];
-            if (typeof firstEmail === 'string') {
-                email = firstEmail;
-            } else if (firstEmail.address) {
-                email = firstEmail.address;
-            } else if (firstEmail.value) {
-                email = firstEmail.value;
-            }
-        }
+        const email = extractEmail(empresa); // Usa a função de utilidade
         const dataAbertura = formatarData(empresa.founded);
         const status = empresa.status?.text || 'N/A';
         const statusClass = status === 'Ativa' ? 'status-active' : 'status-inactive';
@@ -147,6 +182,12 @@ function displayResults(results) {
 
     // Atualizar contagem de resultados
     resultCount.textContent = `${results.length} empresa(s) encontrada(s)`;
+
+    // Adiciona o botão de exportar emails
+    const exportButton = document.getElementById('btnExportEmails');
+    if (exportButton) {
+        exportButton.classList.remove('hidden');
+    }
 
     // Mostrar container de resultados
     resultsContainer.classList.remove('hidden');
@@ -175,6 +216,11 @@ function clearResults() {
     resultsContainer.classList.add('hidden');
     noResults.classList.add('hidden');
     debugInfo.classList.add('hidden');
+    // Oculta o botão de exportar
+    const exportButton = document.getElementById('btnExportEmails');
+    if (exportButton) {
+        exportButton.classList.add('hidden');
+    }
 }
 
 // Função para mostrar/ocultar spinner
@@ -217,3 +263,20 @@ function setDefaultDates() {
 
 // Inicializar com datas padrão
 setDefaultDates();
+
+// Event Listeners
+searchForm.addEventListener('submit', handleSearch);
+// Adiciona o listener para o novo botão de exportar
+document.addEventListener('click', function(e) {
+    if (e.target.id === 'btnExportEmails') {
+        exportEmails();
+    }
+});
+
+// Ocultar o botão de exportar no início
+document.addEventListener('DOMContentLoaded', () => {
+    const exportButton = document.getElementById('btnExportEmails');
+    if (exportButton) {
+        exportButton.classList.add('hidden');
+    }
+});
