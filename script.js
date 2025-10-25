@@ -59,7 +59,7 @@ async function handleSearch(e) {
             'founded.gte': dataInicioISO,
             'founded.lte': dataFimISO,
             'company.simei.optant.eq': 'true', // Filtro MEI reativado
-            'limit': '5000' // Aumenta o limite para um valor alto para buscar todos os resultados de uma vez
+            'limit': '10000' // Aumenta o limite para 10.000, conforme solicitado
         });
 
         const url = `${API_BASE_URL}?${params.toString()}`;
@@ -169,8 +169,6 @@ document.addEventListener('click', function(e) {
         exportEmails();
     }
 });
-        requestUrlSpan.textContent = url;
-        debugInfo.classList.remove('hidden');
 
 // Função para exibir resultados
 function displayResults(results) {
