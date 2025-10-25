@@ -16,16 +16,12 @@ const noResults = document.getElementById('noResults');
 const tableBody = document.getElementById('tableBody');
 const resultCount = document.getElementById('resultCount');
 const btnSearch = document.querySelector('.btn-search');
-const btnExportEmails = document.getElementById('btnExportEmails');
-const btnExportCNPJs = document.getElementById('btnExportCNPJs');
-
-// Variável global para armazenar os resultados da busca
-let currentResults = [];
 
 // Event Listeners
 searchForm.addEventListener('submit', handleSearch);
-btnExportEmails.addEventListener('click', () => exportData('emails'));
-btnExportCNPJs.addEventListener('click', () => exportData('cnpjs'));
+
+// Variável global para armazenar todos os resultados
+let allResults = [];
 
 // Função principal de busca
 async function handleSearch(e) {
@@ -42,7 +38,7 @@ async function handleSearch(e) {
 
     // Limpar resultados anteriores
     clearResults();
-    currentResults = []; // Limpa a variável de resultados também
+    allResults = []; // Limpa resultados globais
     
     // Ocultar debug
     debugInfo.classList.add('hidden');
@@ -63,7 +59,7 @@ async function handleSearch(e) {
             'founded.gte': dataInicioISO,
             'founded.lte': dataFimISO,
             'company.simei.optant.eq': 'true', // Filtro MEI reativado
-            'limit': '5'
+            'limit': '5000' // Aumenta o limite para um valor alto para buscar todos os resultados de uma vez
         });
 
         const url = `${API_BASE_URL}?${params.toString()}`;
@@ -91,8 +87,8 @@ async function handleSearch(e) {
         // Processar resultados
         // CORREÇÃO: A API CNPJjá retorna o array de resultados na chave 'records'
         if (data.records && data.records.length > 0) {
-            currentResults = data.records; // Armazena os resultados globalmente
-            displayResults(currentResults); // Usando currentResults
+            allResults = data.records; // Armazena todos os resultados
+            displayResults(allResults); // Exibe os resultados
         } else {
             showNoResults();
         }
@@ -103,45 +99,6 @@ async function handleSearch(e) {
         showLoading(false);
         btnSearch.disabled = false;
     }
-}
-
-// Função para exibir resultados
-function displayResults(results) {
-    // Limpar tabela
-    tableBody.innerHTML = '';
-
-    // Adicionar linhas à tabela
-    results.forEach((empresa, index) => {
-        const row = document.createElement('tr');
-        
-        // Extrair dados
-        const cnpj = empresa.taxId || 'N/A';
-        const razaoSocial = empresa.company?.name || 'N/A';
-        const email = extractEmail(empresa) || 'N/A';
-        const dataAbertura = formatarData(empresa.founded);
-        const status = empresa.status?.text || 'N/A';
-        const statusClass = status === 'Ativa' ? 'status-active' : 'status-inactive';
-
-        row.innerHTML = `
-            <td><strong>${formatarCNPJ(cnpj)}</strong></td>
-            <td>${razaoSocial}</td>
-            <td><a href="mailto:${email}">${email}</a></td>
-            <td>${dataAbertura}</td>
-            <td><span class="${statusClass}">${status}</span></td>
-        `;
-
-        tableBody.appendChild(row);
-    });
-
-    // Atualizar contagem de resultados
-    resultCount.textContent = `${results.length} empresa(s) encontrada(s)`;
-
-    // Mostrar container de resultados e botões de exportação
-    resultsContainer.classList.remove('hidden');
-    noResults.classList.add('hidden');
-    debugInfo.classList.add('hidden');
-    btnExportEmails.classList.remove('hidden');
-    btnExportCNPJs.classList.remove('hidden');
 }
 
 // Função de utilidade para extrair o email de um registro
@@ -165,58 +122,104 @@ function extractEmail(empresa) {
             email = firstEmail.value;
         }
     }
-    return email === 'N/A' || email === '' ? null : email;
+    return email;
 }
 
-// Função para copiar/exportar dados (emails ou cnpjs)
-async function exportData(type) {
-    if (currentResults.length === 0) {
+// Função para exportar emails
+function exportEmails() {
+    if (allResults.length === 0) {
         alert('Nenhum resultado para exportar.');
         return;
     }
 
-    let dataToExport;
-    let fileName;
-    let dataType;
+    const emails = allResults
+        .map(empresa => extractEmail(empresa))
+        .filter(email => email !== 'N/A');
 
-    if (type === 'emails') {
-        // Filtra e mapeia apenas emails válidos
-        dataToExport = currentResults
-            .map(extractEmail)
-            .filter(email => email !== null);
-        fileName = 'emails_mei.txt';
-        dataType = 'Emails';
-    } else if (type === 'cnpjs') {
-        // Mapeia e formata CNPJs
-        dataToExport = currentResults
-            .map(empresa => formatarCNPJ(empresa.taxId || 'N/A'))
-            .filter(cnpj => cnpj !== 'N/A');
-        fileName = 'cnpjs_mei.txt';
-        dataType = 'CNPJs';
-    } else {
+    if (emails.length === 0) {
+        alert('Nenhum email válido encontrado para exportar.');
         return;
     }
 
-    const content = dataToExport.join('\\n');
+    const emailsText = emails.join('\\n');
+    
+    // Cria um Blob para download
+    const blob = new Blob([emailsText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    // Cria um link temporário para iniciar o download
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'emails_mei_export.txt';
+    document.body.appendChild(a);
+    a.click();
+    
+    // Limpa o link temporário e o URL do objeto
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    alert(`Exportação concluída! ${emails.length} e-mail(s) exportado(s) para "emails_mei_export.txt".`);
+}
 
-    // Tenta copiar para a área de transferência
-    try {
-        await navigator.clipboard.writeText(content);
-        alert(`${dataType} copiados para a área de transferência!`);
-    } catch (err) {
-        console.error('Falha ao copiar para a área de transferência:', err);
-        // Se falhar, oferece download como alternativa
-        const blob = new Blob([content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        alert(`Falha ao copiar para a área de transferência. Iniciando download de ${fileName} como alternativa.`);
+// Event Listeners
+searchForm.addEventListener('submit', handleSearch);
+// Adiciona o listener para o novo botão de exportar (será criado no HTML)
+document.addEventListener('click', function(e) {
+    if (e.target.id === 'btnExportEmails') {
+        exportEmails();
     }
+});
+        requestUrlSpan.textContent = url;
+        debugInfo.classList.remove('hidden');
+
+// Função para exibir resultados
+function displayResults(results) {
+    // Limpar tabela
+    tableBody.innerHTML = '';
+
+    // Adicionar linhas à tabela
+    results.forEach((empresa, index) => {
+        const row = document.createElement('tr');
+        
+        // Extrair dados
+        const cnpj = empresa.taxId || 'N/A';
+        const razaoSocial = empresa.company?.name || 'N/A';
+        const email = extractEmail(empresa); // Usa a nova função de utilidade
+        const dataAbertura = formatarData(empresa.founded);
+        const status = empresa.status?.text || 'N/A';
+        const statusClass = status === 'Ativa' ? 'status-active' : 'status-inactive';
+
+        row.innerHTML = `
+            <td><strong>${formatarCNPJ(cnpj)}</strong></td>
+            <td>${razaoSocial}</td>
+            <td><a href="mailto:${email}">${email}</a></td>
+            <td>${dataAbertura}</td>
+            <td><span class="${statusClass}">${status}</span></td>
+        `;
+
+        tableBody.appendChild(row);
+    });
+
+    // Atualizar contagem de resultados
+    resultCount.textContent = `${results.length} empresa(s) encontrada(s)`;
+
+    // Adiciona o botão de exportar emails
+    const exportButton = document.getElementById('btnExportEmails');
+    if (exportButton) {
+        exportButton.classList.remove('hidden');
+    }
+
+    // Mostrar container de resultados
+    resultsContainer.classList.remove('hidden');
+    noResults.classList.add('hidden');
+    debugInfo.classList.add('hidden'); // Oculta a seção de debug após o sucesso
+}
+
+// Função para exibir mensagem de nenhum resultado
+function showNoResults() {
+    resultsContainer.classList.add('hidden');
+    noResults.classList.remove('hidden');
+    debugInfo.classList.add('hidden');
 }
 
 // Função para exibir erro
@@ -233,22 +236,10 @@ function clearResults() {
     resultsContainer.classList.add('hidden');
     noResults.classList.add('hidden');
     debugInfo.classList.add('hidden');
-    // Ocultar botões de exportação ao limpar
-    if (btnExportEmails && btnExportCNPJs) {
-        btnExportEmails.classList.add('hidden');
-        btnExportCNPJs.classList.add('hidden');
-    }
-}
-
-// Função para exibir mensagem de nenhum resultado
-function showNoResults() {
-    resultsContainer.classList.add('hidden');
-    noResults.classList.remove('hidden');
-    debugInfo.classList.add('hidden');
-    // Ocultar botões de exportação
-    if (btnExportEmails && btnExportCNPJs) {
-        btnExportEmails.classList.add('hidden');
-        btnExportCNPJs.classList.add('hidden');
+    // Oculta o botão de exportar
+    const exportButton = document.getElementById('btnExportEmails');
+    if (exportButton) {
+        exportButton.classList.add('hidden');
     }
 }
 
@@ -292,3 +283,11 @@ function setDefaultDates() {
 
 // Inicializar com datas padrão
 setDefaultDates();
+
+// Ocultar o botão de exportar no início
+document.addEventListener('DOMContentLoaded', () => {
+    const exportButton = document.getElementById('btnExportEmails');
+    if (exportButton) {
+        exportButton.classList.add('hidden');
+    }
+});
